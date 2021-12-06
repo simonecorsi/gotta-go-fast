@@ -19,7 +19,7 @@ impl Default for Router {
 #[wasm_bindgen]
 impl Router {
     #[wasm_bindgen(constructor)]
-    pub fn new(supported_methods: &str) -> Self {
+    pub fn new() -> Self {
         Router { ..Self::default() }
     }
 

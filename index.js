@@ -3,17 +3,31 @@ const wasm = require("./pkg/gotta_go_fast");
 
 const NOOP = () => {};
 
-class GottaGoFast {
-  constructor() {
-    this.router = new wasm.Router(METHODS.join(","));
-    this.handlers = [];
+module.exports = class GottaGoFast {
+  constructor({ httpMethods = METHODS, cache = false } = {}) {
+    this.router = new wasm.Router();
+    this.callbacks = [];
+
+    if (cache) {
+      const QuickLRU = require("@alloc/quick-lru");
+      this.cache = new QuickLRU({ maxSize: 10000 });
+    }
 
     // create convenience methods, eg: get("/users", () => {})
-    for (const method of METHODS) {
+    for (const method of httpMethods) {
       this[method.toLowerCase()] = (path, handler) => {
         this.insert(path, method, handler);
       };
     }
+  }
+
+  lookup(req, res) {
+    const handler = this.route(req.url, req.method.toLowerCase());
+    if (typeof handler === "function") {
+      return handler(req, res);
+    }
+    res.statusCode = 404;
+    res.end("NotFound");
   }
 
   insert(path, method = "GET", handler) {
@@ -23,38 +37,27 @@ class GottaGoFast {
     if (typeof method !== "string" || !method.length) {
       throw new TypeError("Invalid: method");
     }
-
-    const idx = this.handlers.push(
+    const idx = this.callbacks.push(
       typeof handler === "function" ? handler : NOOP
     );
-    this.router.insert(path, idx);
+    const key = `/${method.toLowerCase()}${path}`;
+    this.router.insert(key, idx - 1);
   }
 
-  lookup(path) {
+  route(path, method) {
+    const key = `/${method.toLowerCase()}${path}`;
+    if (this.cache && this.cache.has(key)) return this.cache.get(key);
     if (typeof path !== "string" || !path.length) {
       throw new TypeError("Invalid: path");
     }
-    const idx = this.router.lookup(path);
-    if (Number.isFinite(idx) && idx >= 0) {
-      return this.handlers[idx](idx);
+    if (typeof method !== "string" || !method.length) {
+      throw new TypeError("Invalid: method");
+    }
+
+    const idx = this.router.lookup(key);
+    if (Number.isFinite(idx) && idx >= 0 && this.callbacks[idx]) {
+      this.cache && this.cache.set(key, this.callbacks[idx]);
+      return this.callbacks[idx];
     }
   }
-}
-
-const router = new GottaGoFast();
-
-router.get("/", console.log);
-router.get("/users", console.log);
-router.get("/users/:id", console.log);
-router.get("/users/:id/:org", console.log);
-router.get("/users/:user_id/repos", console.log);
-router.get("/users/:user_id/repos/:id", console.log);
-router.get("/users/:user_id/repos/:id/*any", console.log);
-router.get("/:username", console.log);
-router.get("/*any", console.log);
-router.get("/about", console.log);
-router.get("/about/", console.log);
-router.get("/about/us", console.log);
-router.get("/users/repos/*any", console.log);
-
-console.log(router.lookup("/users/123"));
+};
